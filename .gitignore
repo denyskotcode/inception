@@ -1,0 +1,14 @@
+# Secrets — never commit credentials
+secrets/
+
+# TLS private key
+srcs/requirements/nginx/conf/*.key
+
+# Environment — copy from .env.example and fill in
+srcs/.env
+
+# IDE
+.vscode/
+
+# Claude memory
+.claude/
