@@ -33,3 +33,81 @@ The result is a fully functional WordPress website served over HTTPS, backed by 
 - **Idempotent setup scripts** — safe to stop and restart without data loss
 - **Named volumes** with bind mount driver for reliable data persistence
 - **WP-CLI** for fully automated, non-interactive WordPress installation
+
+---
+
+## Architecture
+
+The infrastructure follows a classic three-tier web architecture: reverse proxy → application server → database. All three tiers run in separate containers on a private Docker bridge network named `inception`.
+
+```
+                          Internet
+                              │
+                   HTTPS : 443 (TLS 1.2 / 1.3)
+                              │
+             ┌────────────────▼────────────────┐
+             │              NGINX              │
+             │   Web Server  &  TLS Gateway    │
+             └────────────────┬────────────────┘
+                              │
+                   FastCGI : 9000 (internal)
+                              │
+             ┌────────────────▼────────────────┐       ┌─────────────────────────┐
+             │    WordPress  +  PHP 8.2-FPM    │◄──────┤        MariaDB          │
+             │         Application Layer       │ 3306  │      Database Layer     │
+             └────────────────┬────────────────┘       └────────────┬────────────┘
+                              │                                     │
+                     ┌────────▼────────┐                   ┌────────▼────────┐
+                     │    wp-data      │                   │    db-data      │
+                     │    volume       │                   │    volume       │
+                     │ /data/wordpress │                   │  /data/mariadb  │
+                     └─────────────────┘                   └─────────────────┘
+```
+
+**Traffic flow:**
+
+1. Client connects to `https://dkot.42.fr:443`
+2. NGINX terminates TLS and forwards PHP requests to `wordpress:9000` via FastCGI
+3. PHP-FPM processes the request, queries `mariadb:3306` as needed
+4. Response travels back through NGINX to the client over TLS
+
+Only NGINX is reachable from outside. MariaDB and PHP-FPM are completely isolated inside the Docker network.
+
+---
+
+## Services
+
+### NGINX — Web Server & TLS Gateway
+
+The only container accessible from the internet. Handles all incoming HTTPS connections on port 443, terminates TLS, and proxies PHP requests to WordPress via the FastCGI protocol. Static files are served directly from the shared `wp-data` volume.
+
+| Property | Value |
+|----------|-------|
+| Base image | `debian:bookworm` |
+| Exposed port | `443` (HTTPS, mapped to host) |
+| TLS versions | 1.2 and 1.3 only |
+| FastCGI upstream | `wordpress:9000` |
+| Static files | `/var/www/html` (read-only volume mount) |
+
+### WordPress + PHP-FPM — Application Server
+
+Runs PHP 8.2-FPM to process WordPress PHP files. Communicates with NGINX via FastCGI on port 9000 and with MariaDB via TCP on port 3306. WP-CLI handles the full WordPress installation automatically on first startup.
+
+| Property | Value |
+|----------|-------|
+| Base image | `debian:bookworm` |
+| PHP version | 8.2-FPM |
+| Internal port | `9000` (FastCGI, Docker network only) |
+| PHP extensions | `mysql`, `curl`, `gd`, `mbstring`, `xml`, `zip` |
+| Automation | WP-CLI for core install, config, and user creation |
+
+### MariaDB — Database Backend
+
+Stores all WordPress data: posts, users, settings, themes, and media metadata. Runs entirely on the internal Docker network — never exposed to the outside. Credentials are injected via Docker secrets at runtime.
+
+| Property | Value |
+|----------|-------|
+| Base image | `debian:bookworm` |
+| Internal port | `3306` (TCP, Docker network only) |
+| Credentials | Docker secrets (encrypted) |
+| Persistence | Named volume → `/home/dkot/data/mariadb` |
