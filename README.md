@@ -111,3 +111,111 @@ Stores all WordPress data: posts, users, settings, themes, and media metadata. R
 | Internal port | `3306` (TCP, Docker network only) |
 | Credentials | Docker secrets (encrypted) |
 | Persistence | Named volume → `/home/dkot/data/mariadb` |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Linux virtual machine (Debian / Ubuntu recommended)
+- [Docker Engine 24+](https://docs.docker.com/engine/install/)
+- [Docker Compose v2](https://docs.docker.com/compose/install/)
+- `openssl` for TLS certificate generation
+- `make`
+
+### Installation
+
+**1. Clone the repository**
+
+```bash
+git clone https://github.com/denyskotcode/inception.git
+cd inception
+```
+
+**2. Create the secrets files**
+
+Credentials are never stored in the repository. Create them manually before the first launch:
+
+```bash
+mkdir -p secrets
+
+# MariaDB passwords
+echo "your_db_password"   > secrets/db_password.txt
+echo "your_root_password" > secrets/db_root_password.txt
+
+# WordPress admin and editor accounts
+cat > secrets/credentials.txt << 'EOF'
+WP_ADMIN_USER=admin
+WP_ADMIN_PASSWORD=your_admin_password
+WP_ADMIN_EMAIL=admin@dkot.42.fr
+WP_USER=editor
+WP_USER_PASSWORD=your_editor_password
+WP_USER_EMAIL=editor@dkot.42.fr
+EOF
+```
+
+**3. Generate a self-signed TLS certificate**
+
+```bash
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout srcs/requirements/nginx/conf/dkot.42.fr.key \
+    -out    srcs/requirements/nginx/conf/dkot.42.fr.crt \
+    -subj "/C=FR/ST=IDF/L=Paris/O=42/CN=dkot.42.fr"
+```
+
+**4. Map the domain in `/etc/hosts`**
+
+```bash
+echo "127.0.0.1 dkot.42.fr" | sudo tee -a /etc/hosts
+```
+
+**5. Build and launch everything**
+
+```bash
+make
+```
+
+The first build takes a few minutes as Docker downloads the base image and installs all packages. Once complete, the site is available at `https://dkot.42.fr`.
+
+> **Browser warning**: The self-signed certificate will trigger a security warning. Click **Advanced → Proceed to dkot.42.fr** to continue. This is expected behavior for a local infrastructure.
+
+---
+
+## Usage
+
+### Makefile Commands
+
+| Command | Description |
+|---------|-------------|
+| `make` | Full bootstrap: create data dirs → build images → start containers |
+| `make up` | Build images and start all containers in detached mode |
+| `make down` | Stop and remove containers (images and data are preserved) |
+| `make re` | Full restart: `down` then `up` |
+| `make logs` | Follow real-time logs from all three containers |
+| `make ps` | Display running container status |
+| `make clean` | Full teardown: containers, images, volumes, and all persisted data |
+
+### Access Points
+
+| Service | URL |
+|---------|-----|
+| Website | `https://dkot.42.fr` |
+| WordPress admin | `https://dkot.42.fr/wp-admin` |
+
+Admin credentials are defined in `secrets/credentials.txt` under `WP_ADMIN_USER` and `WP_ADMIN_PASSWORD`.
+
+### Container Operations
+
+```bash
+# Enter a running container for inspection
+docker exec -it nginx    bash
+docker exec -it wordpress bash
+docker exec -it mariadb  bash
+
+# Check a specific container's logs
+docker logs -f nginx
+
+# Inspect a volume
+docker volume inspect inception_wp-data
+```
