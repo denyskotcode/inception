@@ -314,3 +314,101 @@ inception/
     ├── db_root_password.txt
     └── credentials.txt
 ```
+
+---
+
+## Concepts
+
+This section explains the core infrastructure concepts behind the project's design decisions.
+
+### Virtual Machines vs Docker Containers
+
+A **Virtual Machine** emulates an entire physical computer including hardware. It runs a full OS with its own kernel inside a hypervisor (VirtualBox, VMware). VMs are heavy — each one needs gigabytes of disk space and significant RAM just for the OS.
+
+**Docker containers** share the host kernel. They package only the application and its direct dependencies. Containers start in seconds and use megabytes instead of gigabytes.
+
+| | Virtual Machine | Docker Container |
+|---|---|---|
+| Isolation level | Hardware (hypervisor) | Process (kernel namespaces + cgroups) |
+| OS | Full OS per VM | Shared host kernel |
+| Startup time | Minutes | Seconds |
+| Disk footprint | Gigabytes | Megabytes |
+| Portability | Low (hardware-dependent) | High (runs anywhere Docker runs) |
+
+This project uses both: a VM for isolating the entire infrastructure from the host machine, and Docker inside the VM for isolating individual services from each other.
+
+---
+
+### Docker Secrets vs Environment Variables
+
+| | Environment Variables | Docker Secrets |
+|---|---|---|
+| Visibility | Readable via `docker inspect`, logs, `/proc/` | Mounted at `/run/secrets/`, not in inspect |
+| Storage | Plain text in process environment | Encrypted in Docker's internal store |
+| Child processes | Inherited automatically | Must be read explicitly from file |
+| Best for | Non-sensitive config (URLs, names, flags) | Passwords, API keys, tokens |
+
+In this project `.env` holds non-sensitive values like `DOMAIN_NAME` and `MYSQL_DATABASE`. All passwords live in `secrets/` and are never passed as environment variables.
+
+---
+
+### Docker Bridge Network vs Host Network
+
+**Host network** (`network_mode: host`) removes network isolation between a container and the host machine. A service listening on port 80 inside the container occupies port 80 on the host directly.
+
+**Docker bridge network** creates a virtual private subnet for containers. Each service gets its own IP address and communicates with other containers by name — Docker's internal DNS resolves `mariadb` or `wordpress` automatically.
+
+| | Host Network | Bridge Network |
+|---|---|---|
+| Container isolation | None | Full isolation |
+| Port conflicts with host | Possible | Impossible |
+| Container-to-container DNS | Unavailable | Automatic by service name |
+| Security | Low | High |
+
+The `inception` bridge network allows NGINX to reach `wordpress:9000` and WordPress to reach `mariadb:3306` — with nothing else reachable from outside.
+
+---
+
+### Docker Named Volumes vs Bind Mounts
+
+**Bind mounts** directly map a host directory path into a container. The path must exist on the host and is tightly coupled to the host filesystem layout.
+
+**Named volumes** are managed by Docker. Docker decides where to store them and tracks their lifecycle. They are portable, visible in `docker volume ls`, and inspectable with `docker volume inspect`.
+
+This project uses named volumes with `driver_opts` to get the best of both — Docker manages the volume, but the data is physically stored at a specific host path required by the subject:
+
+```yaml
+volumes:
+  wp-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /home/dkot/data/wordpress
+```
+
+| | Bind Mount | Named Volume |
+|---|---|---|
+| Managed by | User | Docker |
+| `docker volume ls` | Not visible | Visible |
+| `docker volume inspect` | Not available | Full metadata |
+| Portability | Low (host path must exist) | High |
+
+---
+
+## Resources
+
+- [Docker documentation](https://docs.docker.com/)
+- [Docker Compose reference](https://docs.docker.com/compose/compose-file/)
+- [NGINX documentation](https://nginx.org/en/docs/)
+- [PHP-FPM configuration](https://www.php.net/manual/en/install.fpm.configuration.php)
+- [WP-CLI documentation](https://wp-cli.org/)
+- [MariaDB documentation](https://mariadb.com/kb/en/documentation/)
+- [Docker secrets](https://docs.docker.com/engine/swarm/secrets/)
+- [TLS protocol — MDN](https://developer.mozilla.org/en-US/docs/Web/Security/Transport_Layer_Security)
+
+---
+
+<div align="center">
+  <sub>Built as part of the <a href="https://42.fr">42 School</a> curriculum by <a href="https://github.com/denyskotcode">dkot</a></sub>
+</div>
