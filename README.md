@@ -219,3 +219,98 @@ docker logs -f nginx
 # Inspect a volume
 docker volume inspect inception_wp-data
 ```
+
+---
+
+## Configuration
+
+### Environment Variables
+
+Non-sensitive configuration is stored in `srcs/.env` and passed to containers via `env_file`:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DOMAIN_NAME` | Domain used in NGINX virtual host | `dkot.42.fr` |
+| `MYSQL_DATABASE` | WordPress database name | `wordpress` |
+| `MYSQL_USER` | MariaDB application user | `wpuser` |
+| `MYSQL_HOST` | MariaDB hostname (resolved by Docker DNS) | `mariadb` |
+| `WP_TITLE` | WordPress site title | `Inception` |
+| `WP_URL` | WordPress site URL | `https://dkot.42.fr` |
+| `DATA_PATH` | Host path for named volume bind mounts | `/home/dkot/data` |
+
+### Docker Secrets
+
+Sensitive credentials are managed as Docker secrets — encrypted, never visible in `docker inspect`, and only accessible to containers explicitly granted access:
+
+| File | Secret name | Used by |
+|------|-------------|---------|
+| `secrets/db_password.txt` | `db_password` | WordPress, MariaDB |
+| `secrets/db_root_password.txt` | `db_root_password` | MariaDB |
+| `secrets/credentials.txt` | `credentials` | WordPress |
+
+Secrets are mounted at `/run/secrets/<name>` inside each container and read in shell scripts with:
+
+```bash
+DB_PASSWORD=$(cat /run/secrets/db_password)
+```
+
+### Data Persistence
+
+All application data survives container restarts and image rebuilds. Named volumes use the `local` driver with `driver_opts` to bind data to specific host paths:
+
+| Volume | Host path | Container path | Used by |
+|--------|-----------|----------------|---------|
+| `wp-data` | `/home/dkot/data/wordpress` | `/var/www/html` | WordPress (rw), NGINX (ro) |
+| `db-data` | `/home/dkot/data/mariadb` | `/var/lib/mysql` | MariaDB |
+
+Data is destroyed only by `make clean` or manual deletion of `/home/dkot/data/`.
+
+---
+
+## Security
+
+| Layer | Implementation |
+|-------|----------------|
+| **Transport** | TLS 1.2 and 1.3 only — no plain HTTP |
+| **Network isolation** | Only NGINX exposed externally on port 443 |
+| **Credential management** | Docker secrets — encrypted at rest, not in `docker inspect` |
+| **Process isolation** | One service per container — a compromise in one doesn't affect others |
+| **Read-only mounts** | NGINX reads WordPress files via `wp-data` in read-only mode |
+| **No host network** | Bridge network only — containers cannot interfere with host services |
+| **Internal ports** | MariaDB (3306) and PHP-FPM (9000) reachable only inside Docker network |
+| **File permissions** | WordPress files owned by `www-data`, TLS key set to mode `600` |
+
+---
+
+## Project Structure
+
+```
+inception/
+├── Makefile                              # Build and lifecycle automation
+├── srcs/
+│   ├── .env                              # Non-sensitive environment variables
+│   ├── docker-compose.yml               # Service, network, and volume definitions
+│   └── requirements/
+│       ├── mariadb/
+│       │   ├── Dockerfile               # debian:bookworm + mariadb-server
+│       │   ├── conf/
+│       │   │   └── my.cnf               # MariaDB server configuration
+│       │   └── tools/
+│       │       └── db-setup.sh          # Idempotent database initialization
+│       ├── nginx/
+│       │   ├── Dockerfile               # debian:bookworm + nginx
+│       │   └── conf/
+│       │       ├── nginx.conf           # Virtual host with TLS and FastCGI config
+│       │       ├── dkot.42.fr.crt       # Self-signed TLS certificate
+│       │       └── dkot.42.fr.key       # TLS private key (mode 600)
+│       └── wordpress/
+│           ├── Dockerfile               # debian:bookworm + PHP 8.2-FPM + WP-CLI
+│           ├── conf/
+│           │   └── www.conf             # PHP-FPM pool configuration
+│           └── tools/
+│               └── wp-setup.sh          # Automated WordPress installation script
+└── secrets/                             # Not tracked in git — create manually
+    ├── db_password.txt
+    ├── db_root_password.txt
+    └── credentials.txt
+```
