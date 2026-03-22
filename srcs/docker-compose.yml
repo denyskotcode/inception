@@ -1,0 +1,86 @@
+name: inception
+
+services:
+
+  mariadb:
+    build:
+      context: requirements/mariadb
+      dockerfile: Dockerfile
+    image: mariadb
+    container_name: mariadb
+    restart: unless-stopped
+    env_file:
+      - .env
+    secrets:
+      - db_password
+      - db_root_password
+    volumes:
+      - db-data:/var/lib/mysql
+    expose:
+      - "3306"
+    networks:
+      - inception
+
+  wordpress:
+    build:
+      context: requirements/wordpress
+      dockerfile: Dockerfile
+    image: wordpress
+    container_name: wordpress
+    restart: unless-stopped
+    depends_on:
+      - mariadb
+    env_file:
+      - .env
+    secrets:
+      - db_password
+      - credentials
+    volumes:
+      - wp-data:/var/www/html
+    expose:
+      - "9000"
+    networks:
+      - inception
+
+  nginx:
+    build:
+      context: requirements/nginx
+      dockerfile: Dockerfile
+    image: nginx
+    container_name: nginx
+    restart: unless-stopped
+    depends_on:
+      - wordpress
+    ports:
+      - "443:443"
+    volumes:
+      - wp-data:/var/www/html:ro
+    networks:
+      - inception
+
+volumes:
+  db-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /home/dkot/data/mariadb
+
+  wp-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /home/dkot/data/wordpress
+
+secrets:
+  db_password:
+    file: ../secrets/db_password.txt
+  db_root_password:
+    file: ../secrets/db_root_password.txt
+  credentials:
+    file: ../secrets/credentials.txt
+
+networks:
+  inception:
+    driver: bridge
