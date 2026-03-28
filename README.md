@@ -412,3 +412,10 @@ volumes:
 <div align="center">
   <sub>Built as part of the <a href="https://42.fr">42 School</a> curriculum by <a href="https://github.com/denyskotcode">dkot</a></sub>
 </div>
+
+
+---
+
+## License
+
+MIT © [denyskotcode](https://github.com/denyskotcode) — see [LICENSE](LICENSE) for details.
